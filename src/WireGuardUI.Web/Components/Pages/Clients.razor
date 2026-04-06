@@ -1,0 +1,362 @@
+@page "/"
+@rendermode InteractiveServer
+@attribute [Authorize]
+
+<PageTitle>Clients — WireGuard UI</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">Clients</MudText>
+
+<MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
+    <MudTextField T="string" @bind-Value="_search" Label="Search" Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined"
+                  Clearable="true" DebounceInterval="300" Style="max-width:300px" />
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddDialog">
+        New Client
+    </MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+               StartIcon="@Icons.Material.Filled.Sync" OnClick="ApplyConfig"
+               Disabled="_applying">
+        @(_applying ? "Applying…" : "Apply Config")
+    </MudButton>
+    <InputFile OnChange="ImportClientConfig" accept=".conf,text/plain" multiple />
+</MudStack>
+
+@if (_applyResult is not null)
+{
+    <MudAlert Severity="@(_applyResult.Success ? Severity.Success : Severity.Error)" Class="mb-4" ShowCloseIcon="true"
+              CloseIconClicked="() => _applyResult = null">
+        @(_applyResult.Success ? "Configuration applied successfully." : _applyResult.ErrorMessage)
+    </MudAlert>
+}
+
+<MudTable Items="_filteredClients" Dense="true" Hover="true" Striped="true" Loading="_loading">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Email</MudTh>
+        <MudTh>Allocated IP</MudTh>
+        <MudTh>Enabled</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@context.Email</MudTd>
+        <MudTd>@string.Join(", ", context.AllocatedIPs)</MudTd>
+        <MudTd>
+            <MudSwitch T="bool" Value="context.Enabled" ValueChanged="(bool v) => ToggleEnabled(context, v)"
+                       Color="Color.Success" />
+        </MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                           OnClick="() => OpenEditDialog(context)" title="Edit" />
+            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                           OnClick="() => DownloadConfig(context)" title="Download" />
+            <MudIconButton Icon="@Icons.Material.Filled.Email" Size="Size.Small"
+                           OnClick="() => OpenEmailDialog(context)" title="Send via email"
+                           Disabled="string.IsNullOrEmpty(context.Email)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="() => DeleteClient(context)" title="Delete" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>No clients found. Click "New Client" to add one.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@using WireGuardUI.Infrastructure.WireGuard
+@using WireGuardUI.Web.Components.Shared
+@using Microsoft.AspNetCore.Components.Forms
+@inject IClientRepository ClientRepo
+@inject IServerConfigRepository ServerRepo
+@inject IGlobalSettingRepository SettingRepo
+@inject IWireGuardService WireGuardService
+@inject IKeyPairService KeyPairService
+@inject IEmailService EmailService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@code {
+    private static readonly DialogOptions ClientDialogOptions = new()
+    {
+        MaxWidth = MaxWidth.False,
+        FullWidth = true
+    };
+
+    private List<WireGuardClient> _clients = [];
+    private string _search = string.Empty;
+    private bool _loading = true;
+    private bool _applying = false;
+    private ApplyResult? _applyResult;
+
+    private IEnumerable<WireGuardClient> _filteredClients => string.IsNullOrWhiteSpace(_search)
+        ? _clients
+        : _clients.Where(c =>
+            c.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (c.Email?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _clients = await ClientRepo.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task OpenAddDialog()
+    {
+        var server = await ServerRepo.GetAsync();
+        var existingIps = _clients.SelectMany(c => c.AllocatedIPs).ToList();
+        var subnet = server.Addresses.FirstOrDefault() ?? "10.252.1.0/24";
+
+        var parameters = new DialogParameters<ClientDialog>
+        {
+            { x => x.ServerSubnet, subnet },
+            { x => x.ExistingAllocatedIps, existingIps }
+        };
+        var dialog = await DialogService.ShowAsync<ClientDialog>("New Client", parameters, ClientDialogOptions);
+        var result = await dialog.Result;
+        if (!result!.Canceled && result.Data is WireGuardClient newClient)
+        {
+            await ClientRepo.AddAsync(newClient);
+            _clients = await ClientRepo.GetAllAsync();
+            Snackbar.Add($"Client '{newClient.Name}' created.", Severity.Success);
+        }
+    }
+
+    private async Task OpenEditDialog(WireGuardClient client)
+    {
+        var server = await ServerRepo.GetAsync();
+        var existingIps = _clients.Where(c => c.Id != client.Id)
+            .SelectMany(c => c.AllocatedIPs).ToList();
+
+        var parameters = new DialogParameters<ClientDialog>
+        {
+            { x => x.ExistingClient, client },
+            { x => x.ServerSubnet, server.Addresses.FirstOrDefault() ?? "10.252.1.0/24" },
+            { x => x.ExistingAllocatedIps, existingIps }
+        };
+        var dialog = await DialogService.ShowAsync<ClientDialog>("Edit Client", parameters, ClientDialogOptions);
+        var result = await dialog.Result;
+        if (!result!.Canceled && result.Data is WireGuardClient updated)
+        {
+            await ClientRepo.UpdateAsync(updated);
+            _clients = await ClientRepo.GetAllAsync();
+            Snackbar.Add($"Client '{updated.Name}' updated.", Severity.Success);
+        }
+    }
+
+    private async Task ToggleEnabled(WireGuardClient client, bool enabled)
+    {
+        client.Enabled = enabled;
+        await ClientRepo.UpdateAsync(client);
+    }
+
+    private async Task DeleteClient(WireGuardClient client)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Delete Client" },
+            { x => x.Message, $"Delete '{client.Name}'? This cannot be undone." },
+            { x => x.ConfirmText, "Delete" }
+        };
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete", parameters);
+        var result = await dialog.Result;
+        if (!result!.Canceled)
+        {
+            await ClientRepo.DeleteAsync(client.Id);
+            _clients = await ClientRepo.GetAllAsync();
+            Snackbar.Add($"Client '{client.Name}' deleted.", Severity.Info);
+        }
+    }
+
+
+    private async Task DownloadConfig(WireGuardClient client)
+    {
+        var server = await ServerRepo.GetAsync();
+        var settings = await SettingRepo.GetAsync();
+        var config = WireGuardConfigGenerator.GenerateClientConfig(client, server, settings);
+        var fileName = $"{client.Name.Replace(" ", "_")}.conf";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(config);
+        var base64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+    }
+
+    private async Task OpenEmailDialog(WireGuardClient client)
+    {
+        var parameters = new DialogParameters<EmailDialog> { { x => x.Client, client } };
+        await DialogService.ShowAsync<EmailDialog>("Send Config", parameters);
+    }
+
+    private async Task ApplyConfig()
+    {
+        _applying = true;
+        _applyResult = null;
+        try
+        {
+            var config = await WireGuardService.GenerateConfigAsync();
+            await WireGuardService.WriteConfigAsync(config);
+            _applyResult = await WireGuardService.SyncConfAsync();
+            if (_applyResult.Success)
+                Snackbar.Add("Configuration applied successfully.", Severity.Success);
+            else
+                Snackbar.Add(_applyResult.ErrorMessage, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            var message = $"Apply failed: {GetErrorMessage(ex)}";
+            _applyResult = ApplyResult.Fail(message, ex.ToString());
+            Snackbar.Add(message, Severity.Error);
+        }
+        finally
+        {
+            _applying = false;
+        }
+    }
+
+    private async Task ImportClientConfig(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            var files = e.GetMultipleFiles(200);
+            if (files.Count == 0)
+                return;
+
+            var workingClients = await ClientRepo.GetAllAsync();
+            var server = await ServerRepo.GetAsync();
+            var importedCount = 0;
+            var updatedCount = 0;
+            var failedCount = 0;
+            var keySemanticsExplained = false;
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+                    using var reader = new StreamReader(stream);
+                    var content = await reader.ReadToEndAsync();
+
+                    var parsed = WireGuardConfigParser.Parse(content);
+                    if (!parsed.IsSuccess || parsed.Value is null)
+                    {
+                        failedCount++;
+                        Snackbar.Add($"{file.Name}: {parsed.ErrorMessage ?? "Failed to parse config file."}", Severity.Error);
+                        continue;
+                    }
+
+                    var iface = parsed.Value.InterfaceValues;
+                    if (!iface.TryGetValue("PrivateKey", out var privateKey) || string.IsNullOrWhiteSpace(privateKey))
+                    {
+                        failedCount++;
+                        Snackbar.Add($"{file.Name}: missing [Interface] PrivateKey.", Severity.Error);
+                        continue;
+                    }
+
+                    var peer = parsed.Value.Peers.FirstOrDefault();
+                    var peerPublicKey = peer?.Values.TryGetValue("PublicKey", out var pk) == true ? pk : null;
+                    var allowedIps = SplitCsv(peer?.Values.TryGetValue("AllowedIPs", out var allowed) == true ? allowed : "0.0.0.0/0");
+                    var allocatedIps = SplitCsv(iface.TryGetValue("Address", out var address) ? address : string.Empty);
+                    string derivedPublicKey;
+                    try
+                    {
+                        derivedPublicKey = KeyPairService.GetPublicKeyFromPrivateKey(privateKey);
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        Snackbar.Add($"{file.Name}: invalid [Interface] PrivateKey: {ex.Message}", Severity.Error);
+                        continue;
+                    }
+
+                    if (!keySemanticsExplained && !string.IsNullOrWhiteSpace(peerPublicKey))
+                    {
+                        Snackbar.Add("Import note: in a client config, [Peer] PublicKey is the server key. Client PublicKey is derived from [Interface] PrivateKey.", Severity.Info);
+                        keySemanticsExplained = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(peerPublicKey) &&
+                        !string.IsNullOrWhiteSpace(server.PublicKey) &&
+                        !string.Equals(peerPublicKey, server.PublicKey, StringComparison.Ordinal))
+                    {
+                        Snackbar.Add($"{file.Name}: [Peer] PublicKey does not match current Server public key. Generated configs will use the current Server key.", Severity.Warning);
+                    }
+
+                    var imported = new WireGuardClient
+                    {
+                        Name = Path.GetFileNameWithoutExtension(file.Name),
+                        PrivateKey = privateKey,
+                        PublicKey = derivedPublicKey,
+                        PresharedKey = peer?.Values.TryGetValue("PresharedKey", out var psk) == true ? psk : string.Empty,
+                        AllocatedIPs = allocatedIps,
+                        AllowedIPs = allowedIps.Count == 0 ? ["0.0.0.0/0"] : allowedIps,
+                        Endpoint = peer?.Values.TryGetValue("Endpoint", out var endpoint) == true ? endpoint : null,
+                        UseServerDns = iface.ContainsKey("DNS"),
+                        Enabled = true
+                    };
+
+                    var existing = workingClients.FirstOrDefault(c => c.PublicKey == imported.PublicKey);
+                    if (existing is not null)
+                    {
+                        existing.Name = imported.Name;
+                        existing.PrivateKey = imported.PrivateKey;
+                        existing.PresharedKey = imported.PresharedKey;
+                        existing.AllocatedIPs = imported.AllocatedIPs;
+                        existing.AllowedIPs = imported.AllowedIPs;
+                        existing.Endpoint = imported.Endpoint;
+                        existing.UseServerDns = imported.UseServerDns;
+                        existing.Enabled = true;
+                        await ClientRepo.UpdateAsync(existing);
+                        updatedCount++;
+                        continue;
+                    }
+
+                    if (workingClients.Any(c => c.Name.Equals(imported.Name, StringComparison.OrdinalIgnoreCase)))
+                        imported.Name = $"{imported.Name}-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+
+                    await ClientRepo.AddAsync(imported);
+                    workingClients.Add(imported);
+                    importedCount++;
+                }
+                catch (Exception ex)
+                {
+                    failedCount++;
+                    Snackbar.Add($"{file.Name}: import failed: {ex.Message}", Severity.Error);
+                }
+            }
+
+            _clients = await ClientRepo.GetAllAsync();
+
+            var summary = $"Import complete. Added: {importedCount}, updated: {updatedCount}, failed: {failedCount}.";
+            Snackbar.Add(summary, failedCount > 0 ? Severity.Warning : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static List<string> SplitCsv(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    private static string GetErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        Exception? current = ex;
+        while (current is not null && messages.Count < 4)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message))
+                messages.Add(current.Message.Trim());
+            current = current.InnerException;
+        }
+        return messages.Count == 0 ? "Unknown error." : string.Join(" | ", messages.Distinct());
+    }
+}

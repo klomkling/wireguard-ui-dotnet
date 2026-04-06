@@ -1,0 +1,86 @@
+@page "/global-settings"
+@rendermode InteractiveServer
+@attribute [Authorize]
+
+<PageTitle>Global Settings — WireGuard UI</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-4">Global Settings</MudText>
+
+@if (_setting is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-6" Elevation="1">
+        <MudTextField T="string" @bind-Value="_setting.EndpointAddress" Label="Endpoint Address"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      HelperText="Public IP or hostname clients use to connect" />
+        <MudTextField T="string" @bind-Value="_dnsText" Label="DNS Servers (comma-separated)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      HelperText="e.g. 1.1.1.1, 8.8.8.8" />
+        <MudNumericField T="int" @bind-Value="_setting.Mtu" Label="MTU"
+                         Variant="Variant.Outlined" Class="mb-3" Min="576" Max="9000" />
+        <MudNumericField T="int" @bind-Value="_setting.PersistentKeepalive" Label="Persistent Keepalive (seconds)"
+                         Variant="Variant.Outlined" Class="mb-3" Min="0" />
+        <MudTextField T="string" @bind-Value="_setting.FirewallMark" Label="Firewall Mark"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+        <MudTextField T="string" @bind-Value="_setting.Table" Label="Routing Table"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+        <MudTextField T="string" @bind-Value="_setting.ConfigFilePath" Label="Config File Path"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+
+        <MudStack Row="true" Class="mt-4" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">Save</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Sync" OnClick="SaveAndApply"
+                       Disabled="_applying">
+                @(_applying ? "Applying…" : "Save & Apply Config")
+            </MudButton>
+        </MudStack>
+
+        @if (_applyResult is not null)
+        {
+            <MudAlert Class="mt-4" Severity="@(_applyResult.Success ? Severity.Success : Severity.Error)"
+                      ShowCloseIcon="true" CloseIconClicked="() => _applyResult = null">
+                @(_applyResult.Success ? "Applied successfully." : _applyResult.ErrorMessage)
+            </MudAlert>
+        }
+    </MudPaper>
+}
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@inject IGlobalSettingRepository SettingRepo
+@inject IWireGuardService WireGuardService
+@inject ISnackbar Snackbar
+
+@code {
+    private GlobalSetting? _setting;
+    private string _dnsText = string.Empty;
+    private bool _applying;
+    private ApplyResult? _applyResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _setting = await SettingRepo.GetAsync();
+        _dnsText = string.Join(", ", _setting.DnsServers);
+    }
+
+    private async Task Save()
+    {
+        _setting!.DnsServers = _dnsText.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        await SettingRepo.SaveAsync(_setting);
+        Snackbar.Add("Global settings saved.", Severity.Success);
+    }
+
+    private async Task SaveAndApply()
+    {
+        await Save();
+        _applying = true;
+        var config = await WireGuardService.GenerateConfigAsync();
+        await WireGuardService.WriteConfigAsync(config);
+        _applyResult = await WireGuardService.SyncConfAsync();
+        _applying = false;
+    }
+}

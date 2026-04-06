@@ -1,0 +1,59 @@
+@inject IServerConfigRepository ServerRepo
+@inject IGlobalSettingRepository SettingRepo
+@inject IEmailService EmailService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Send Config — @Client.Name</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_toEmail" Label="Send to email" Variant="Variant.Outlined"
+                      FullWidth="true" InputType="InputType.Email"
+                      HelperText="Defaults to client's email if set." />
+        @if (_sending)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mt-3" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_sending">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Send"
+                   Disabled="@(_sending || string.IsNullOrWhiteSpace(_toEmail))">
+            Send
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public WireGuardClient Client { get; set; } = null!;
+
+    private string _toEmail = string.Empty;
+    private bool _sending;
+
+    protected override void OnInitialized() => _toEmail = Client.Email ?? string.Empty;
+
+    private async Task Send()
+    {
+        _sending = true;
+        var server = await ServerRepo.GetAsync();
+        var settings = await SettingRepo.GetAsync();
+        var result = await EmailService.SendClientConfigAsync(Client, server, settings, _toEmail);
+        _sending = false;
+
+        if (result.IsSuccess)
+        {
+            Snackbar.Add($"Config sent to {_toEmail}.", Severity.Success);
+            MudDialog.Close();
+        }
+        else
+        {
+            Snackbar.Add($"Failed to send: {result.ErrorMessage}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

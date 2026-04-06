@@ -1,0 +1,16 @@
+.git
+.gitignore
+.idea
+.vscode
+.cursor
+.zed
+
+**/bin
+**/obj
+**/TestResults
+**/*.user
+**/*.suo
+
+publish
+docker-data
+

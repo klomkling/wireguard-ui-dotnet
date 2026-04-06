@@ -1,0 +1,254 @@
+@page "/email-settings"
+@rendermode InteractiveServer
+@attribute [Authorize]
+
+<PageTitle>Email Settings — WireGuard UI</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-4">Email Settings</MudText>
+
+@if (_setting is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-6" Elevation="1">
+
+        @* ── Provider preset ── *@
+        <MudSelect T="string" Value="_provider" ValueChanged="ApplyPreset" Label="Provider"
+                   Variant="Variant.Outlined" Class="mb-4">
+            <MudSelectItem T="string" Value="@("Custom")">Custom</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Gmail")">Gmail</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Outlook")">Outlook / Hotmail / Office 365</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Yahoo")">Yahoo Mail</MudSelectItem>
+        </MudSelect>
+
+        @* ── Auth type — OAuth2 available for Gmail and Outlook/Hotmail ── *@
+        <MudSelect T="string" @bind-Value="_setting.AuthType" Label="Auth Type"
+                   Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@("Password")">Password (SMTP / App Password)</MudSelectItem>
+            @if (_provider is "Gmail" or "Outlook")
+            {
+                <MudSelectItem T="string" Value="@("OAuth2")">OAuth2</MudSelectItem>
+            }
+        </MudSelect>
+
+        @* ── Connection ── *@
+        <MudTextField T="string" @bind-Value="_setting.SmtpHost" Label="SMTP Host"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+        <MudNumericField T="int" @bind-Value="_setting.SmtpPort" Label="SMTP Port"
+                         Variant="Variant.Outlined" Class="mb-3" Min="1" Max="65535" />
+        <MudSelect T="string" @bind-Value="_setting.Encryption" Label="Encryption"
+                   Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@("None")">None</MudSelectItem>
+            <MudSelectItem T="string" Value="@("STARTTLS")">STARTTLS</MudSelectItem>
+            <MudSelectItem T="string" Value="@("SSL")">SSL / TLS</MudSelectItem>
+        </MudSelect>
+        <MudTextField T="string" @bind-Value="_setting.FromAddress" Label="From Address"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      InputType="InputType.Email" />
+
+        @* ── Credentials ── *@
+        @if (_setting.AuthType == "OAuth2")
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                @if (_provider == "Outlook")
+                {
+                    <text>
+                        Basic auth is disabled by Microsoft. Use OAuth2 with an Azure app registration.
+                        Required delegated scope: <code>https://outlook.office.com/SMTP.Send</code>
+                        (plus <code>offline_access</code> to get a refresh token).
+                    </text>
+                }
+                else
+                {
+                    <text>
+                        Create <strong>OAuth 2.0 Client ID</strong> credentials (Desktop app) in
+                        <MudLink Href="https://console.cloud.google.com/apis/credentials" Target="_blank">Google Cloud Console</MudLink>
+                        and enable the <strong>Gmail API</strong>. Get a refresh token via
+                        <MudLink Href="https://developers.google.com/oauthplayground" Target="_blank">OAuth2 Playground</MudLink>
+                        with scope <code>https://mail.google.com/</code>.
+                    </text>
+                }
+            </MudAlert>
+            <MudTextField T="string" @bind-Value="_setting.SmtpUsername" Label="Email Account"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                          HelperText="Usually the same as From Address" InputType="InputType.Email" />
+            <MudTextField T="string" @bind-Value="_setting.OAuth2ClientId" Label="OAuth2 Client ID"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+            <MudTextField T="string" @bind-Value="_setting.OAuth2ClientSecret" Label="OAuth2 Client Secret"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                          HelperText="Optional for public-client apps; required for confidential-client apps."
+                          InputType="InputType.Password" />
+            <MudTextField T="string" @bind-Value="_setting.OAuth2RefreshToken" Label="OAuth2 Refresh Token"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                          InputType="InputType.Password" />
+            @if (_provider == "Outlook")
+            {
+                <MudSelect T="string" @bind-Value="_setting.OAuth2Tenant" Label="Microsoft Account Type"
+                           Variant="Variant.Outlined" Class="mb-3"
+                           HelperText="Required: choose the account type that matches the refresh token (Personal or Work/School).">
+                    <MudSelectItem T="string" Value="@string.Empty">Select account type...</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("consumers")">Personal only (Hotmail / Outlook.com / Xbox)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("organizations")">Work / School only (Microsoft 365)</MudSelectItem>
+                </MudSelect>
+            }
+        }
+        else
+        {
+            <MudTextField T="string" @bind-Value="_setting.SmtpUsername" Label="SMTP Username"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+            <MudTextField T="string" @bind-Value="_setting.SmtpPassword" Label="SMTP Password / App Password"
+                          Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                          InputType="InputType.Password" />
+
+            @if (_provider is "Gmail" or "Yahoo")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">
+                    @_provider requires an <strong>App Password</strong> — not your regular account password.
+                    @if (_provider == "Gmail")
+                    {
+                        <text> Generate one at <MudLink Href="https://myaccount.google.com/apppasswords" Target="_blank">myaccount.google.com/apppasswords</MudLink>.</text>
+                    }
+                    else
+                    {
+                        <text> Generate one at <MudLink Href="https://login.yahoo.com/account/security/app-passwords" Target="_blank">Yahoo Account Security</MudLink>.</text>
+                    }
+                </MudAlert>
+            }
+        }
+
+        <MudStack Row="true" Class="mt-4" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">Save</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Info"
+                       StartIcon="@Icons.Material.Filled.Send" OnClick="TestConnection"
+                       Disabled="_testing">
+                @(_testing ? "Testing…" : "Test Connection")
+            </MudButton>
+        </MudStack>
+
+        @if (_testResult is not null)
+        {
+            <MudAlert Class="mt-4"
+                      Severity="@(_testResult.IsSuccess ? Severity.Success : Severity.Error)"
+                      ShowCloseIcon="true" CloseIconClicked="() => _testResult = null">
+                @(_testResult.IsSuccess ? "Connection successful!" : _testResult.ErrorMessage)
+            </MudAlert>
+        }
+    </MudPaper>
+}
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@inject IEmailSettingRepository SettingRepo
+@inject IEmailService EmailService
+@inject ISnackbar Snackbar
+
+@code {
+    private EmailSetting? _setting;
+    private bool _testing;
+    private Result? _testResult;
+    private string _provider = "Custom";
+
+    private record SmtpPreset(string Host, int Port, string Encryption);
+
+    private static readonly Dictionary<string, SmtpPreset> Presets = new()
+    {
+        ["Gmail"]   = new("smtp.gmail.com",         587, "STARTTLS"),
+        ["Outlook"] = new("smtp.office365.com",      587, "STARTTLS"),
+        ["Yahoo"]   = new("smtp.mail.yahoo.com",     587, "STARTTLS"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _setting = await SettingRepo.GetAsync();
+
+        // Detect provider from saved host so the dropdown reflects the current state
+        _provider = DetectProviderFromHost(_setting.SmtpHost);
+        if (_provider == "Outlook" &&
+            _setting.AuthType == "OAuth2" &&
+            _setting.OAuth2Tenant.Equals("common", StringComparison.OrdinalIgnoreCase))
+        {
+            _setting.OAuth2Tenant = string.Empty;
+        }
+    }
+
+    private void ApplyPreset(string provider)
+    {
+        _provider = provider;
+
+        // Reset to Password if switching away from providers that support OAuth2 in this app
+        if (provider is not ("Gmail" or "Outlook") && _setting!.AuthType == "OAuth2")
+            _setting.AuthType = "Password";
+
+        if (!Presets.TryGetValue(provider, out var preset))
+            return;
+
+        _setting!.SmtpHost   = preset.Host;
+        _setting.SmtpPort    = preset.Port;
+        _setting.Encryption  = preset.Encryption;
+    }
+
+    private static string DetectProviderFromHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+            return "Custom";
+
+        if (host.Contains("gmail", StringComparison.OrdinalIgnoreCase))
+            return "Gmail";
+        if (host.Contains("outlook", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("office365", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("hotmail", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("live.com", StringComparison.OrdinalIgnoreCase))
+            return "Outlook";
+        if (host.Contains("yahoo", StringComparison.OrdinalIgnoreCase))
+            return "Yahoo";
+
+        return "Custom";
+    }
+
+    private async Task Save()
+    {
+        if (!ValidateOutlookOAuth2Tenant())
+            return;
+
+        await SettingRepo.SaveAsync(_setting!);
+        Snackbar.Add("Email settings saved.", Severity.Success);
+    }
+
+    private async Task TestConnection()
+    {
+        if (!ValidateOutlookOAuth2Tenant())
+            return;
+
+        _testing = true;
+        _testResult = null;
+        await SettingRepo.SaveAsync(_setting!);
+        _testResult = await EmailService.TestConnectionAsync(_setting!);
+        _testing = false;
+    }
+
+    private bool ValidateOutlookOAuth2Tenant()
+    {
+        if (_setting is null)
+            return false;
+
+        if (_provider == "Outlook" && _setting.AuthType == "OAuth2")
+        {
+            var tenant = _setting.OAuth2Tenant?.Trim();
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                Snackbar.Add("Please select Microsoft Account Type: Personal or Work/School.", Severity.Error);
+                return false;
+            }
+
+            if (tenant.Equals("common", StringComparison.OrdinalIgnoreCase))
+            {
+                Snackbar.Add("Both/common is not allowed. Select Personal or Work/School.", Severity.Error);
+                _setting.OAuth2Tenant = string.Empty;
+                return false;
+            }
+        }
+
+        return true;
+    }
+}

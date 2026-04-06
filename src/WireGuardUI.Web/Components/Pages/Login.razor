@@ -1,0 +1,46 @@
+@page "/login"
+@layout EmptyLayout
+@using WireGuardUI.Web.Components.Layout
+
+<PageTitle>Login — WireGuard UI</PageTitle>
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="min-height:100vh">
+    <MudPaper Elevation="4" Class="pa-8" Style="width:100%;max-width:400px">
+        <MudText Typo="Typo.h5" Align="Align.Center" Class="mb-6">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Class="mr-2" />
+            WireGuard UI
+        </MudText>
+
+        @if (Request.Query.ContainsKey("error"))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                Invalid username or password.
+            </MudAlert>
+        }
+
+        <form method="post" action="/account/login">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@(Request.Query["returnUrl"])" />
+
+            <MudTextField T="string" name="username" Label="Username" Variant="Variant.Outlined"
+                          FullWidth="true" Class="mb-4" autocomplete="username" />
+            <MudTextField T="string" name="password" Label="Password" Variant="Variant.Outlined"
+                          InputType="InputType.Password" FullWidth="true" Class="mb-6"
+                          autocomplete="current-password" />
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
+                       Color="Color.Primary" FullWidth="true" Size="Size.Large">
+                Sign In
+            </MudButton>
+        </form>
+    </MudPaper>
+</MudContainer>
+
+@inject IHttpContextAccessor HttpContextAccessor
+@code {
+    private HttpRequest Request => HttpContextAccessor.HttpContext!.Request;
+}

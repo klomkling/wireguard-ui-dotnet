@@ -1,0 +1,238 @@
+@page "/server"
+@rendermode InteractiveServer
+@attribute [Authorize]
+
+<PageTitle>Server — WireGuard UI</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-4">Server Configuration</MudText>
+
+@if (_config is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-6" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-4">Key Pair</MudText>
+        <MudTextField T="string" @bind-Value="_config.PrivateKey" Label="Private Key"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      InputType="InputType.Password" />
+        <MudTextField T="string" @bind-Value="_config.PublicKey" Label="Public Key" 
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                   StartIcon="@Icons.Material.Filled.VpnKey" OnClick="RegenerateKeyPair">
+            Regenerate Key Pair
+        </MudButton>
+
+        <MudDivider Class="my-6" />
+
+        <MudText Typo="Typo.h6" Class="mb-4">Interface</MudText>
+        <MudTextField T="string" @bind-Value="_addressesText" Label="Addresses (one per line)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" Lines="2" />
+        <MudNumericField T="int" @bind-Value="_config.ListenPort" Label="Listen Port"
+                         Variant="Variant.Outlined" Class="mb-3" Min="1" Max="65535" />
+        <MudTextField T="string" @bind-Value="_config.PostUp" Label="PostUp" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" />
+        <MudTextField T="string" @bind-Value="_config.PreDown" Label="PreDown" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" />
+        <MudTextField T="string" @bind-Value="_config.PostDown" Label="PostDown" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" />
+
+        <MudStack Row="true" Class="mt-4" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">Save</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Sync" OnClick="SaveAndApply"
+                       Disabled="_applying">
+                @(_applying ? "Applying…" : "Save & Apply Config")
+            </MudButton>
+            <InputFile OnChange="ImportServerConfig" accept=".conf,text/plain" />
+        </MudStack>
+
+        @if (_applyResult is not null)
+        {
+            <MudAlert Class="mt-4" Severity="@(_applyResult.Success ? Severity.Success : Severity.Error)"
+                      ShowCloseIcon="true" CloseIconClicked="() => _applyResult = null">
+                @(_applyResult.Success ? "Applied successfully." : _applyResult.ErrorMessage)
+            </MudAlert>
+        }
+    </MudPaper>
+}
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@using WireGuardUI.Infrastructure.WireGuard
+@using WireGuardUI.Web.Components.Shared
+@using Microsoft.AspNetCore.Components.Forms
+@inject IServerConfigRepository ServerRepo
+@inject IGlobalSettingRepository SettingRepo
+@inject IWireGuardService WireGuardService
+@inject IKeyPairService KeyPairService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+@code {
+    private ServerConfig? _config;
+    private string _addressesText = string.Empty;
+    private bool _applying;
+    private ApplyResult? _applyResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _config = await ServerRepo.GetAsync();
+        _addressesText = string.Join("\n", _config.Addresses);
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            await SaveCoreAsync();
+            Snackbar.Add("Server configuration saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {GetErrorMessage(ex)}", Severity.Error);
+        }
+    }
+
+    private async Task SaveCoreAsync()
+    {
+        _config!.Addresses = _addressesText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        await ServerRepo.SaveAsync(_config);
+    }
+
+    private async Task SaveAndApply()
+    {
+        _applyResult = null;
+        _applying = true;
+        try
+        {
+            await SaveCoreAsync();
+            var config = await WireGuardService.GenerateConfigAsync();
+            await WireGuardService.WriteConfigAsync(config);
+            _applyResult = await WireGuardService.SyncConfAsync();
+
+            if (_applyResult.Success)
+                Snackbar.Add("Configuration applied successfully.", Severity.Success);
+            else
+                Snackbar.Add(_applyResult.ErrorMessage, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            var message = $"Apply failed: {GetErrorMessage(ex)}";
+            _applyResult = ApplyResult.Fail(message, ex.ToString());
+            Snackbar.Add(message, Severity.Error);
+        }
+        finally
+        {
+            _applying = false;
+        }
+    }
+
+    private async Task RegenerateKeyPair()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { x => x.Title, "Regenerate Key Pair" },
+            { x => x.Message, "All clients will need to update their [Peer] PublicKey. Continue?" },
+            { x => x.ConfirmText, "Regenerate" }
+        };
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Warning", parameters);
+        var result = await dialog.Result;
+        if (!result!.Canceled)
+        {
+            var (priv, pub) = KeyPairService.GenerateKeyPair();
+            _config!.PrivateKey = priv;
+            _config.PublicKey = pub;
+            await ServerRepo.SaveAsync(_config);
+            Snackbar.Add("Key pair regenerated. Remember to re-distribute client configs.", Severity.Warning);
+        }
+    }
+
+    private async Task CopyToClipboard(string text) =>
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+
+    private async Task ImportServerConfig(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+
+            var parsed = WireGuardConfigParser.Parse(content);
+            if (!parsed.IsSuccess || parsed.Value is null)
+            {
+                Snackbar.Add(parsed.ErrorMessage ?? "Failed to parse config file.", Severity.Error);
+                return;
+            }
+
+            var iface = parsed.Value.InterfaceValues;
+            var server = _config ?? await ServerRepo.GetAsync();
+            var settings = await SettingRepo.GetAsync();
+
+            if (iface.TryGetValue("PrivateKey", out var privateKey) && !string.IsNullOrWhiteSpace(privateKey))
+            {
+                server.PrivateKey = privateKey;
+                server.PublicKey = KeyPairService.GetPublicKeyFromPrivateKey(privateKey);
+            }
+
+            if (iface.TryGetValue("Address", out var addresses))
+                server.Addresses = SplitCsv(addresses);
+
+            if (iface.TryGetValue("ListenPort", out var listenPort) && int.TryParse(listenPort, out var parsedPort))
+                server.ListenPort = parsedPort;
+
+            if (iface.TryGetValue("PostUp", out var postUp))
+                server.PostUp = postUp;
+            if (iface.TryGetValue("PreDown", out var preDown))
+                server.PreDown = preDown;
+            if (iface.TryGetValue("PostDown", out var postDown))
+                server.PostDown = postDown;
+
+            if (iface.TryGetValue("DNS", out var dns))
+                settings.DnsServers = SplitCsv(dns);
+            if (iface.TryGetValue("MTU", out var mtu) && int.TryParse(mtu, out var parsedMtu))
+                settings.Mtu = parsedMtu;
+            if (iface.TryGetValue("FwMark", out var fwMark))
+                settings.FirewallMark = fwMark;
+            if (iface.TryGetValue("Table", out var table))
+                settings.Table = table;
+
+            await ServerRepo.SaveAsync(server);
+            await SettingRepo.SaveAsync(settings);
+
+            _config = await ServerRepo.GetAsync();
+            _addressesText = string.Join("\n", _config.Addresses);
+            Snackbar.Add("Server config imported successfully.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static List<string> SplitCsv(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    private static string GetErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        Exception? current = ex;
+        while (current is not null && messages.Count < 4)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message))
+                messages.Add(current.Message.Trim());
+            current = current.InnerException;
+        }
+        return messages.Count == 0 ? "Unknown error." : string.Join(" | ", messages.Distinct());
+    }
+}

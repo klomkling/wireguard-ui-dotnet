@@ -1,0 +1,23 @@
+services:
+  wireguard-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wireguard-ui-wg-test
+    ports:
+      - "${WG_UI_HOST_PORT:-5080}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      WireGuardUI__DbPath: /data/db/wireguard-ui.db
+      WireGuardUI__WireGuardConfigPath: /etc/wireguard/wg0.conf
+      WireGuardUI__WireGuardExePath: wg
+      WireGuardUI__DefaultUsername: admin
+      WireGuardUI__DefaultPassword: ChangeThisBeforeExposure123!
+    volumes:
+      - ./docker-data/db:/data/db
+      - ./docker-data/conf:/etc/wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped

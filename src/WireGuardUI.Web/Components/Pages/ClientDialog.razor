@@ -1,0 +1,114 @@
+@inject IKeyPairService KeyPairService
+@inject IIpAllocationService IpAllocationService
+
+<MudDialog Class="client-dialog-responsive">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsEdit ? "Edit Client" : "New Client")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_client.Name" Label="Name" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" Required="true" />
+        <MudTextField T="string" @bind-Value="_client.Email" Label="Email (optional)" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" InputType="InputType.Email" />
+        <MudTextField T="string" @bind-Value="_client.PrivateKey" Label="Client Private Key (optional, for existing client)" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" InputType="InputType.Password"
+                      HelperText="For imported/existing clients. If provided, Client Public Key will be derived from this value." />
+        <MudTextField T="string" @bind-Value="_client.PublicKey" Label="Client Public Key (required)" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" Required="true"
+                      HelperText="This is the client key. Do not use [Peer] PublicKey from a client config file (that one is the server key)." />
+        <MudTextField T="string" @bind-Value="_client.PresharedKey" Label="Preshared Key (optional)" Variant="Variant.Outlined"
+                      FullWidth="true" Class="mb-3" InputType="InputType.Password" />
+        <MudTextField T="string" @bind-Value="_allocatedIpsText" Label="Allocated IPs (one per line)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      Lines="2" HelperText="e.g. 10.252.1.2/32" />
+        <MudTextField T="string" @bind-Value="_allowedIpsText" Label="Allowed IPs (one per line)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3"
+                      Lines="2" HelperText="e.g. 0.0.0.0/0" />
+        <MudTextField T="string" @bind-Value="_extraAllowedIpsText" Label="Extra Allowed IPs (optional)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" Lines="2" />
+        <MudTextField T="string" @bind-Value="_client.Endpoint" Label="Endpoint override (optional)"
+                      Variant="Variant.Outlined" FullWidth="true" Class="mb-3" />
+        <MudSwitch T="bool" @bind-Value="_client.UseServerDns" Label="Use server DNS" Color="Color.Primary" />
+        <MudSwitch T="bool" @bind-Value="_client.Enabled" Label="Enable after creation" Color="Color.Primary" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="string.IsNullOrWhiteSpace(_client.Name)">
+            @(IsEdit ? "Save" : "Create")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public WireGuardClient? ExistingClient { get; set; }
+    [Parameter] public string ServerSubnet { get; set; } = "10.252.1.0/24";
+    [Parameter] public List<string> ExistingAllocatedIps { get; set; } = [];
+
+    private WireGuardClient _client = new();
+    private string _allocatedIpsText = string.Empty;
+    private string _allowedIpsText = "0.0.0.0/0";
+    private string _extraAllowedIpsText = string.Empty;
+    private bool IsEdit => ExistingClient is not null;
+
+    protected override void OnInitialized()
+    {
+        if (ExistingClient is not null)
+        {
+            _client = new WireGuardClient
+            {
+                Id = ExistingClient.Id,
+                Name = ExistingClient.Name,
+                Email = ExistingClient.Email,
+                PrivateKey = ExistingClient.PrivateKey,
+                PublicKey = ExistingClient.PublicKey,
+                PresharedKey = ExistingClient.PresharedKey,
+                AllocatedIPs = [..ExistingClient.AllocatedIPs],
+                AllowedIPs = [..ExistingClient.AllowedIPs],
+                ExtraAllowedIPs = [..ExistingClient.ExtraAllowedIPs],
+                Endpoint = ExistingClient.Endpoint,
+                UseServerDns = ExistingClient.UseServerDns,
+                Enabled = ExistingClient.Enabled,
+                CreatedAt = ExistingClient.CreatedAt
+            };
+            _allocatedIpsText = string.Join("\n", _client.AllocatedIPs);
+            _allowedIpsText = string.Join("\n", _client.AllowedIPs);
+            _extraAllowedIpsText = string.Join("\n", _client.ExtraAllowedIPs);
+        }
+        else
+        {
+            var (priv, pub) = KeyPairService.GenerateKeyPair();
+            _client.PrivateKey = priv;
+            _client.PublicKey = pub;
+            _client.PresharedKey = KeyPairService.GeneratePresharedKey();
+            try
+            {
+                var nextIp = IpAllocationService.AllocateNextIp(ServerSubnet, ExistingAllocatedIps);
+                _allocatedIpsText = nextIp;
+            }
+            catch { _allocatedIpsText = string.Empty; }
+        }
+    }
+
+    private void Submit()
+    {
+        if (!string.IsNullOrWhiteSpace(_client.PrivateKey))
+        {
+            // Keep key pair consistent when private key is present.
+            _client.PublicKey = KeyPairService.GetPublicKeyFromPrivateKey(_client.PrivateKey);
+        }
+
+        _client.AllocatedIPs = _allocatedIpsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        _client.AllowedIPs = _allowedIpsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        _client.ExtraAllowedIPs = _extraAllowedIpsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        MudDialog.Close(DialogResult.Ok(_client));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,101 @@
+@page "/status"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@implements IAsyncDisposable
+
+<PageTitle>Status — WireGuard UI</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-4">
+    WireGuard Status
+    <MudChip T="string" Color="@(_status is null ? Color.Default : Color.Success)" Size="Size.Small" Class="ml-2">
+        @(_loading ? "Loading…" : _status is null ? "Unavailable" : "Live")
+    </MudChip>
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning">@_error</MudAlert>
+}
+else if (_status is not null)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1"><strong>Interface:</strong> @_status.InterfaceName</MudText>
+        <MudText Typo="Typo.subtitle1"><strong>Public Key:</strong> @_status.PublicKey</MudText>
+        <MudText Typo="Typo.subtitle1"><strong>Listen Port:</strong> @_status.ListenPort</MudText>
+    </MudPaper>
+
+    <MudText Typo="Typo.h6" Class="mb-2">Peers (@_status.Peers.Count)</MudText>
+    <MudTable Items="_status.Peers" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>Public Key</MudTh>
+            <MudTh>Endpoint</MudTh>
+            <MudTh>Allowed IPs</MudTh>
+            <MudTh>Last Handshake</MudTh>
+            <MudTh>RX / TX</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Style="font-family:monospace;font-size:12px">
+                @context.PublicKey[..12]…
+            </MudTd>
+            <MudTd>@(context.Endpoint ?? "—")</MudTd>
+            <MudTd>@string.Join(", ", context.AllowedIPs)</MudTd>
+            <MudTd>@(context.LastHandshake ?? "Never")</MudTd>
+            <MudTd>@FormatBytes(context.RxBytes) / @FormatBytes(context.TxBytes)</MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudText Typo="Typo.caption" Class="mt-4" Color="Color.Secondary">
+    Auto-refreshes every 10 seconds.
+</MudText>
+
+@using WireGuardUI.Core.Interfaces
+@using WireGuardUI.Core.Models
+@inject IWireGuardService WireGuardService
+
+@code {
+    private WireGuardStatus? _status;
+    private string? _error;
+    private bool _loading = true;
+    private Timer? _timer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await Refresh();
+        _timer = new Timer(async _ =>
+        {
+            await Refresh();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+    }
+
+    private async Task Refresh()
+    {
+        _loading = true;
+        var result = await WireGuardService.GetStatusAsync();
+        if (result.IsSuccess)
+        {
+            _status = result.Value;
+            _error = null;
+        }
+        else
+        {
+            _error = $"Could not read WireGuard status: {result.ErrorMessage}";
+        }
+        _loading = false;
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_timer is not null)
+            await _timer.DisposeAsync();
+    }
+}

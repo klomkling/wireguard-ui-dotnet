@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WireGuardUI.Core/WireGuardUI.Core.csproj" />
+    <Project Path="src/WireGuardUI.Infrastructure/WireGuardUI.Infrastructure.csproj" />
+    <Project Path="src/WireGuardUI.Web/WireGuardUI.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WireGuardUI.Tests/WireGuardUI.Tests.csproj" />
+  </Folder>
+</Solution>

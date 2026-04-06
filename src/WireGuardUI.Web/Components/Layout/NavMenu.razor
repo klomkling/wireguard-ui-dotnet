@@ -1,0 +1,17 @@
+@inject NavigationManager Nav
+
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All"
+                Icon="@Icons.Material.Filled.People">Clients</MudNavLink>
+    <MudNavLink Href="/server"
+                Icon="@Icons.Material.Filled.Dns">Server</MudNavLink>
+    <MudNavLink Href="/global-settings"
+                Icon="@Icons.Material.Filled.Settings">Global Settings</MudNavLink>
+    <MudNavLink Href="/email-settings"
+                Icon="@Icons.Material.Filled.Email">Email Settings</MudNavLink>
+    <MudNavLink Href="/status"
+                Icon="@Icons.Material.Filled.MonitorHeart">Status</MudNavLink>
+    <MudDivider Class="my-2" />
+    <MudNavLink Href="/profile"
+                Icon="@Icons.Material.Filled.AccountCircle">Profile</MudNavLink>
+</MudNavMenu>
