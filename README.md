@@ -1,5 +1,13 @@
 # WireGuardUI
 
+[![CI](https://img.shields.io/github/actions/workflow/status/klomkling/wireguard-ui-dotnet/ci.yml?branch=main&label=CI)](https://github.com/klomkling/wireguard-ui-dotnet/actions/workflows/ci.yml)
+![Latest](https://img.shields.io/github/v/release/klomkling/wireguard-ui-dotnet?label=latest)
+![.NET](https://img.shields.io/badge/.NET-10-blueviolet)
+![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4)
+![SQLite](https://img.shields.io/badge/SQLite-003B57)
+![License](https://img.shields.io/github/license/klomkling/wireguard-ui-dotnet)
+[![Sponsor](https://img.shields.io/badge/Sponsor-Buy%20me%20a%20coffee-ff813f)](https://buymeacoffee.com/klomkling)
+
 WireGuardUI is a Blazor Server web app for managing WireGuard server settings, clients, and config distribution.
 
 ## Features
