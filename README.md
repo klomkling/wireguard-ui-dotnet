@@ -1,7 +1,7 @@
 # WireGuardUI
 
-[![CI](https://img.shields.io/github/actions/workflow/status/klomkling/wireguard-ui-dotnet/ci.yml?branch=main&label=CI)](https://github.com/klomkling/wireguard-ui-dotnet/actions/workflows/ci.yml)
-![Latest](https://img.shields.io/github/v/release/klomkling/wireguard-ui-dotnet?label=latest)
+[![CI](https://github.com/klomkling/wireguard-ui-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/klomkling/wireguard-ui-dotnet/actions/workflows/ci.yml)
+![Latest](https://img.shields.io/github/v/tag/klomkling/wireguard-ui-dotnet?sort=semver&label=latest)
 ![.NET](https://img.shields.io/badge/.NET-10-blueviolet)
 ![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4)
 ![SQLite](https://img.shields.io/badge/SQLite-003B57)
